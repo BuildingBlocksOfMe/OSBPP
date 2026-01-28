@@ -1,11 +1,47 @@
+import { prisma } from "@/lib/prisma";
+import { auth } from "@/auth";
+import { notFound } from "next/navigation";
 import { FileText, Folder, MoreHorizontal, History } from "lucide-react";
+import PlanEditor from "@/components/PlanEditor"; // We'll create this next
+import { formatDistanceToNow } from "date-fns";
+import RepoHeader from "@/components/RepoHeader";
 
 export default async function RepoPage({
     params,
 }: {
     params: Promise<{ user: string; repo: string }>;
 }) {
-    const { user, repo } = await params;
+    const { user: username, repo: planName } = await params;
+    const session = await auth();
+
+    // 1. Find User by Name
+    // Note: We are assuming 'name' is unique-ish for now. Real world needs 'username' field.
+    const owner = await prisma.user.findFirst({
+        where: { name: username },
+    });
+
+    if (!owner) {
+        return notFound();
+    }
+
+    // 2. Find Plan
+    const plan = await prisma.plan.findFirst({
+        where: {
+            name: planName,
+            ownerId: owner.id
+        },
+        include: {
+            _count: {
+                select: { stars: true }
+            }
+        }
+    });
+
+    if (!plan) {
+        return notFound();
+    }
+
+    const isOwner = session?.user?.id === plan.ownerId;
 
     return (
         <div className="flex flex-col gap-4">
@@ -33,39 +69,36 @@ export default async function RepoPage({
                 </div>
             </div>
 
-            {/* File List */}
+            {/* File List (Mocked for now, except README/Content) */}
             <div className="border border-[var(--border)] rounded-md overflow-hidden bg-[var(--canvas-default)]">
                 {/* Header */}
                 <div className="bg-[var(--canvas-subtle)] border-b border-[var(--border)] px-4 py-3 flex items-center justify-between text-sm">
                     <div className="flex items-center gap-2">
                         <div className="w-5 h-5 rounded-full bg-[var(--accent)]/20 flex items-center justify-center text-[var(--accent)] text-xs font-bold">
-                            {user[0].toUpperCase()}
+                            {username[0].toUpperCase()}
                         </div>
-                        <span className="font-semibold hover:underline cursor-pointer">{user}</span>
-                        <span className="text-[var(--muted)]">Initial commit</span>
+                        <span className="font-semibold hover:underline cursor-pointer">{username}</span>
+                        <span className="text-[var(--muted)]">Updated {formatDistanceToNow(plan.updatedAt, { addSuffix: true })}</span>
                     </div>
 
                     <div className="flex items-center gap-4 text-[var(--muted)]">
-                        <span className="hidden md:inline text-xs">Targeting release v1.0</span>
+                        <span className="hidden md:inline text-xs">Latest commit {plan.id.substring(0, 7)}</span>
                         <div className="flex items-center gap-1 hover:text-[var(--accent)] cursor-pointer">
                             <History size={14} />
-                            <span className="font-semibold">12 commits</span>
+                            <span className="font-semibold">{plan.createdAt === plan.updatedAt ? "1 commit" : "2+ commits"}</span>
                         </div>
                     </div>
                 </div>
 
                 {/* Files */}
                 <div className="divide-y divide-[var(--border)]">
-                    <FileRow name=".github" type="folder" message="Configure workflows" time="2 days ago" />
-                    <FileRow name="src" type="folder" message="Initialize project structure" time="3 days ago" />
-                    <FileRow name=".gitignore" type="file" message="Initial commit" time="3 days ago" />
-                    <FileRow name="README.md" type="file" message="Update documentation" time="5 hours ago" />
-                    <FileRow name="business-plan.docx" type="file" message="Draft v1" time="1 week ago" />
-                    <FileRow name="financials.xlsx" type="file" message="Q1 Projections" time="1 week ago" />
+                    {/* We treat the plan content as "README.md" */}
+                    <FileRow name="README.md" type="file" message="Update business plan content" time={formatDistanceToNow(plan.updatedAt)} />
+                    <FileRow name=".gitignore" type="file" message="Initial commit" time={formatDistanceToNow(plan.createdAt)} />
                 </div>
             </div>
 
-            {/* README Preview */}
+            {/* Plan Content Viewer/Editor */}
             <div className="border border-[var(--border)] rounded-md mt-6 bg-[var(--canvas-default)]">
                 <div className="px-4 py-2 bg-[var(--canvas-subtle)] border-b border-[var(--border)] flex items-center gap-2 sticky top-0">
                     <div className="p-1 hover:bg-[var(--border)] rounded cursor-pointer">
@@ -73,20 +106,12 @@ export default async function RepoPage({
                     </div>
                     <span className="font-semibold text-sm">README.md</span>
                 </div>
-                <div className="p-8 prose dark:prose-invert max-w-none">
-                    <h1>{repo}</h1>
-                    <p>Calculated projections for the upcoming fiscal year. This business plan outlines our strategy for market domination.</p>
 
-                    <h2>Goals</h2>
-                    <ul>
-                        <li>Achieve $1M ARR</li>
-                        <li>Expand to 3 new markets</li>
-                        <li>Hire 5 key engineers</li>
-                    </ul>
-
-                    <h2>Getting Started</h2>
-                    <p>Read the <code>business-plan.docx</code> for the full narrative.</p>
-                </div>
+                <PlanEditor
+                    initialContent={plan.content || ""}
+                    planId={plan.id}
+                    isOwner={isOwner}
+                />
             </div>
         </div>
     );
